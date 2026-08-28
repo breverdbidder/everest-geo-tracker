@@ -51,24 +51,53 @@ for full upstream attribution.
 - **Self-hosted mode**: `IS_CLOUD=false` / `NEXT_PUBLIC_IS_CLOUD=false` — all
   features unlocked, no Stripe.
 
-### Provider status (as of the initial self-host session)
+### Provider status (updated 2026-08-28, second self-host session — Cloro approved)
 
 | Engine | Path | Status |
 |---|---|---|
-| Claude (direct API) | `ai-tracker.js` → Anthropic SDK, `web_search` tool | 🚫 BLOCKED — `ANTHROPIC_API_KEY` not present in this app's runtime env (exists as a GH Actions secret elsewhere in the org, not wired to this service) |
-| ChatGPT (direct API) | `ai-tracker.js` → OpenAI SDK | 🚫 BLOCKED — no `OPENAI_API_KEY` anywhere in the org |
-| Perplexity / Google AI Overview / Google AI Mode / Copilot / Grok / ChatGPT-web / Gemini-web | Cloro scraper (`cloro-scraper.js`) | 🚫 BLOCKED — no `CLORO_API_KEY` anywhere in the org. Cloro is a paid third-party service (free tier: 500 credits/mo; paid $30–$5,000+/mo); per this fork's non-goals, nobody should sign up for it — including the free tier — without Ariel's approval |
+| Claude (direct API) | `ai-tracker.js` → Anthropic SDK, `web_search` tool | 🚫 BLOCKED — `ANTHROPIC_API_KEY` not present in this app's runtime env or in the Supabase vault (checked both live this session). The vault does hold `anthropic_oauth_bearer`/`anthropic_oauth_refresh_token`, but those are Claude Code Max-plan OAuth session tokens, not an Anthropic API key — wrong auth mechanism for this SDK call, and CLAUDE.md's `ai.primary: Claude (Max plan, never API)` rules out repurposing them here anyway |
+| ChatGPT (direct API, `gpt-4o-mini` etc.) | `ai-tracker.js` → OpenAI SDK | 🚫 BLOCKED — no `OPENAI_API_KEY` anywhere in the org (checked vault + job env live) |
+| ChatGPT-web / Google AI Overview / Copilot-web / Gemini-web | Cloro scraper (`cloro-scraper.js`) | ✅ **LIVE** — `cloro_api_key` (Ariel-approved free tier, stored in Supabase vault) wired to `CLORO_API_KEY`. Real tracking run completed for all four: response bodies stored (2.6–6.3 KB each), `mention_count=0` for Winner Data on the seeded prompt — a real GTM finding, not a null result |
+| Perplexity-web | Cloro scraper | ⚠️ Submitted successfully (Cloro accepted the task) but Cloro's own backend returned `INTERNAL_SERVER_ERROR` after 65 poll attempts (~16 min) — an upstream Cloro-side failure on this specific task, not a config or auth problem. Retry on a future run; not retried in-session per cost discipline (one attempt per approach) |
+| Grok-web | Cloro scraper | 🚫 Self-disabled upstream since 2026-08-18 (`UNAVAILABLE_PLATFORMS` in `tracking-worker.js`) — unrelated to our credentials, leave as-is per Ariel's instruction |
 | Gemini (analysis only: sentiment, topic/prompt/competitor suggestions, Site Audit signals) | `ai-provider.js` (Vercel AI SDK) | ✅ LIVE — `gemini_api_key` from the shared Supabase vault wired to `GOOGLE_GENERATIVE_AI_API_KEY` |
 
-A live end-to-end tracking run was executed against Winner Data's seeded
-prompt (`"What is the best property data API for insurance companies?"`,
-`platforms: [perplexity-web, google-aio]`, `models: [claude-sonnet-4-5,
-gpt-4o-mini]`) and produced the expected, cleanly-surfaced failures for all
-four engines — `CLORO_API_KEY must be configured` ×2,
-`ANTHROPIC_API_KEY is not configured`, `OPENAI_API_KEY is not configured` —
-confirming the full pipeline (auth → brand → prompt → job runner → per-engine
-dispatch → result storage) is wired correctly end-to-end and blocked on
-credentials only.
+A real, non-mocked tracking run (job `007a17ea-10ee-4be9-bef6-a82a0268f15d`)
+was triggered against Winner Data's seeded prompt
+(`"What is the best property data API for insurance companies?"`) across
+`platforms: [chatgpt-web, google-aio, copilot-web, perplexity-web,
+gemini-web]` — every platform Cloro can currently deliver — plus
+`models: [claude-sonnet-4-5, gpt-4o-mini]` for the still-blocked direct
+engines. Result: 4/5 Cloro platforms produced stored `prompt_results` rows
+with real response text; 1/5 (Perplexity) failed upstream at Cloro; both
+direct-model engines failed cleanly and exactly as documented above. See the
+issue #19546 completion comment for the full query + output.
+
+### Deploy
+
+- **Web** (Next.js 16, Vercel — Cloudflare Pages does not run this app's SSR/API routes/internal MCP route):
+  `https://everest-geo-tracker.vercel.app`, project `ariel-shapira-s-projects/everest-geo-tracker`,
+  deployed via `vercel deploy --prod` using a vault-stored `vercel_api_token`.
+  Build required one self-hosted-mode fix: `web/src/lib/stripe.ts` instantiates
+  the Stripe SDK at module load (`new Stripe(process.env.STRIPE_SECRET_KEY!)`),
+  which crashes Next.js's page-data-collection step for `/api/stripe/checkout`
+  when the var is unset — even though Stripe is cloud-only and never called
+  in self-hosted mode. Worked around with a placeholder `STRIPE_SECRET_KEY`
+  (not a real key, payments never enabled since `IS_CLOUD=false`) rather than
+  patching upstream code. A cleaner long-term fix upstream would lazy-init the
+  Stripe client inside the route handler instead of at module scope.
+- **Server** (Express, tracking worker + cron): not deployed publicly. It only
+  ran inside this session's sandbox, proven live against production Supabase.
+  The deployed web app's `NEXT_PUBLIC_API_URL` therefore still points at
+  `localhost:8080` and tracking-trigger/job-status calls from the public site
+  will not reach a server once this session ends. Per the brief's own
+  judgment call (§7): recommend either (a) a lightweight always-on host
+  (Render/Railway free tier) for `server/`, or (b) converting the daily cron
+  tracking trigger into a GitHub Actions scheduled workflow in this repo,
+  since that's the server's only recurring job — sign-in/dashboard/brand/
+  competitor CRUD all talk to Supabase directly from the web app and work
+  fine without it. Not built out this session — flagged as the next step
+  rather than left unstated.
 
 ### Adding a 4th tracked brand later
 
