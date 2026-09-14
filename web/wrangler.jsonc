@@ -1,0 +1,25 @@
+{
+  // Cloudflare Workers deploy target for the GEO tracker web app.
+  // Replaces web/vercel.json -- Vercel is no longer used (Ariel, Sep 14 2026).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "everest-geo-tracker",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": { "enabled": true }
+
+  // DO NOT add a "limits" block: the account is on Workers Free, which rejects
+  // limits.cpu_ms (Cloudflare API code 100328).
+  //
+  // DO NOT add "triggers".crons yet. vercel.json used to run
+  //   "0 2 * * *" -> /api/cron/daily-tracking
+  // A Workers Cron Trigger invokes a `scheduled` handler, which the OpenNext
+  // generated worker does not export. Declaring the cron before a scheduled
+  // handler exists would make every fire error. Wiring that handler (a custom
+  // OpenNext entrypoint that re-exports fetch and adds scheduled) is the
+  // outstanding task for restoring daily tracking.
+}
