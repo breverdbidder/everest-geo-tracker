@@ -1,0 +1,45 @@
+name: Deploy web to Cloudflare Workers
+
+# Manual dispatch only, on purpose. No push trigger: run count is the burn
+# signal for GitHub Actions, and this app has no revenue event behind it yet.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Next 16.1.6 + React 19 needs --legacy-peer-deps, same as the
+      # zonewise-web OpenNext migration (Sep 5 2026).
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install Cloudflare adapter
+        run: npm install --no-save --legacy-peer-deps "@opennextjs/cloudflare@^1" "wrangler@^4"
+
+      - name: Build (OpenNext -> Cloudflare)
+        run: npx opennextjs-cloudflare build
+        env:
+          NEXT_PUBLIC_IS_CLOUD: 'false'
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+
+      - name: Deploy to Cloudflare Workers
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
